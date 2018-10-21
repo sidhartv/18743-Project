@@ -90,7 +90,7 @@ def parse_misses(infile, miss_thresh):
 
     logger.info("Started loading cache data from file %s.", infile.name)
     lines = infile.readlines()
-    logger.info("Finished loading caceh data from file %s.", infile.name)
+    logger.info("Finished loading cache data from file %s.", infile.name)
 
     start_idx = lines.index("# Begin LOAD/STORE stats\n")
     end_idx = lines.index("# End LOAD/STORE stats\n")
@@ -165,10 +165,23 @@ def miss_cluster(miss_samples, miss_weights, width, thresh):
 
     return clusters, cluster_sizes, cluster_centroids
 
-def align_addrs(addr, align):
+def align_addrs(addrs, align):
     assert(align > 0);
     assert(align & (align - 1) == 0);
-    return addrs & alignment
+
+    return np.bitwise_and(addrs, ~(align - 1))
+
+def separate_clusters(raw_data, centroids, width):
+    logger = logging.getLogger()
+    cluster_inds = []
+    for i, centroid in enumerate(centroids.flat):
+        cluster_inds.append(np.abs(raw_data - centroid) < width)
+
+        logger.info("Currently partitioning data for cluster %i "\
+                    "with centroid 0x%x: %d addresses grouped",
+                    i, centroid, np.count_nonzero(cluster_inds))
+
+    return cluster_inds
 
 def main():
     args = init_args()
@@ -192,6 +205,8 @@ def main():
 
         logger.info("Found cluster @0x%x with size %d", dense_cluster_centroid,
                     dense_cluster_size)
+
+    separated_data = separate_clusters(samples, cluster_centroids[dense_inds], args.w)
 
 if __name__ == "__main__":
     main()
