@@ -169,7 +169,9 @@ def miss_cluster(miss_samples, miss_weights, width, thresh):
         closest_centroid = get_nearest_point(cluster, centroid)
         cluster_centroids[i] = closest_centroid
 
-    return clusters, cluster_sizes, cluster_centroids
+    return (np.array(clusters),
+            np.array(cluster_sizes),
+            np.array(cluster_centroids))
 
 def align_addrs(addrs, align):
     assert(align > 0);
@@ -189,11 +191,11 @@ def separate_clusters(raw_data, centroids, width):
 
     return cluster_inds
 
-def violin_misses(df, cluster_centroids):
+def violin_misses(df):
     fig, (ax) = plt.subplots(1, 1)
     fig.suptitle("Clustering Density for Application")
 
-    sns.violinplot(x="cluster", y="delta", data=df)
+    sns.violinplot(x="cluster", y="delta", hue="rw", data=df)
 
     return fig
 
@@ -208,8 +210,6 @@ def parse_accesses(infile, cluster_centroids, width, align):
     logger.info("Started loading access data from file %s.", infile.name)
     lines = infile.readlines()
     logger.info("Finished loading access data from file %s.", infile.name)
-
-    print(cluster_centroids)
 
     raw_data = []
     idx = 0
@@ -238,12 +238,12 @@ def main():
     samples, weights = miss_samples(dcache_data_dict)
     clusters, cluster_sizes, cluster_centroids = \
         miss_cluster(samples, weights, args.w * 8, args.t)
-    print([hex(c) for c in cluster_centroids])
+    print(cluster_centroids, cluster_sizes)
 
     # Align centroids to 64-byte (cache line) boundary
     cluster_centroids = align_addrs(cluster_centroids, 64)
-    print([hex(c) for c in cluster_centroids])
-    dense_inds = np.argpartition(cluster_sizes, -args.n)[-args.n:]
+    n_clusters = min(args.n, len(cluster_centroids))
+    dense_inds = np.argpartition(cluster_sizes, -n_clusters)[-n_clusters:]
 
     logger.info("Calculated %d most dense clusters using DBSCAN", args.n)
     for idx in dense_inds:
@@ -256,8 +256,8 @@ def main():
 
     dense_cluster_centroids = cluster_centroids[dense_inds]
 
-    access_df = parse_accesses(args.atrace, cluster_centroids, args.w * 8, 64)
-    fig = violin_misses(access_df, cluster_centroids)
+    access_df = parse_accesses(args.atrace, dense_cluster_centroids, args.w * 8, 64)
+    fig = violin_misses(access_df)
     plt.show()
 
 if __name__ == "__main__":

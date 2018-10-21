@@ -51,7 +51,7 @@ END_LEGAL */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE,    "pintool",
     "o", "dcache.out", "specify dcache file name");
 KNOB<string> KnobTraceFile(KNOB_MODE_WRITEONCE,    "pintool",
-    "o", "atrace.out", "specify access trace file name");
+    "ot", "atrace.out", "specify access trace file name");
 KNOB<BOOL>   KnobTrackLoads(KNOB_MODE_WRITEONCE,    "pintool",
     "tl", "0", "track individual loads -- increases profiling time");
 KNOB<BOOL>   KnobTrackStores(KNOB_MODE_WRITEONCE,   "pintool",
@@ -448,6 +448,8 @@ VOID Fini(int code, VOID * v)
             "#\n";
     }
     out.close();
+
+    tracestream.close();
 }
 
 /* ===================================================================== */
