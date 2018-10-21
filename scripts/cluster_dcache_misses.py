@@ -6,13 +6,19 @@ import logging
 import pprint
 from sklearn.cluster import DBSCAN
 from sklearn import metrics
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 def init_args():
     parser = argparse.ArgumentParser(description="Determine miss clusters")
-    parser.add_argument("infile", nargs="?", type=argparse.FileType("r"),
+    parser.add_argument("dcache", type=argparse.FileType("r"),
                         help="Path to dcache.out of benchmark",
+                        default="dcache.out")
+    parser.add_argument("atrace", nargs="?", type=argparse.FileType("r"),
+                        help="Path to atrace.out of benchmark",
                         default=sys.stdin)
-    parser.add_argument("outfile", nargs="?", type=argparse.FileType("r"),
+    parser.add_argument("-o", "--outfile", nargs="?", type=argparse.FileType("w"),
                         help="Path to cluster.out of benchmark",
                         default=sys.stdout)
 
@@ -49,31 +55,31 @@ def parse_load_store(lines):
     data_re = r"(0x[a-f\d]+):\s+(\d+)\s+(\d+)"
 
     start_idx = lines.index("# Detailed Stats\n")
-    data = {}
+    data_dict = {}
     while True:
         iaddr_offset = 1
         nitems_offset = 2
         data_offset = 6
 
         iaddr = re.match(iaddr_re, lines[start_idx+iaddr_offset]).group(1)
-        if iaddr not in data: data[iaddr] = {}
+        if iaddr not in data_dict: data_dict[iaddr] = {}
 
         for l in lines[start_idx+data_offset:]:
             if l == "DATA:END\n": break
 
             daddr, misses, hits = re.match(data_re, l).groups()
-            if daddr not in data[iaddr]: data[iaddr][daddr] = [int(misses),
-                                                               int(hits)]
+            if daddr not in data_dict[iaddr]:
+                data_dict[iaddr][daddr] = [int(misses), int(hits)]
             else:
-                data[iaddr][daddr][0] += misses
-                data[iaddr][daddr][1] += hits
+                data_dict[iaddr][daddr][0] += misses
+                data_dict[iaddr][daddr][1] += hits
 
         try:
             start_idx += 1 + lines[start_idx+1:].index("# Detailed Stats\n")
         except ValueError:
             break
 
-    return data
+    return data_dict
 
 def prune_misses(stats, thresh):
     miss_data = {}
@@ -113,10 +119,10 @@ def parse_misses(infile, miss_thresh):
 
     return all_miss_data
 
-def miss_samples(miss_data):
+def miss_samples(miss_data_dict):
     daddr2idx = {}
     idx = 0
-    for iaddr, s in miss_data.items():
+    for iaddr, s in miss_data_dict.items():
         for daddr in s:
             if daddr not in daddr2idx:
                 daddr2idx[daddr] = idx
@@ -127,7 +133,7 @@ def miss_samples(miss_data):
     samples = np.zeros((n_addrs, 1), dtype=int)
     weights = np.zeros(n_addrs, dtype=int)
 
-    for iaddr, s in miss_data.items():
+    for iaddr, s in miss_data_dict.items():
         for daddr, misses in s.items():
             idx = daddr2idx[daddr]
             samples[idx] = int(daddr, 16)
@@ -183,18 +189,60 @@ def separate_clusters(raw_data, centroids, width):
 
     return cluster_inds
 
+def violin_misses(df, cluster_centroids):
+    fig, (ax) = plt.subplots(1, 1)
+    fig.suptitle("Clustering Density for Application")
+
+    sns.violinplot(x="cluster", y="delta", data=df)
+
+    return fig
+
+def parse_accesses(infile, cluster_centroids, width, align):
+    """
+    0x7f9fbb809ff3: W 0x7fffcf848bb8
+    """
+    logger = logging.getLogger()
+
+    data_re = r"(0x[a-f\d]+): ([RW]) (0x[a-f\d]+)"
+
+    logger.info("Started loading access data from file %s.", infile.name)
+    lines = infile.readlines()
+    logger.info("Finished loading access data from file %s.", infile.name)
+
+    print(cluster_centroids)
+
+    raw_data = []
+    idx = 0
+    for l in lines:
+        match = re.match(data_re, l)
+        if match:
+            iaddr, rw, daddr = match.groups()
+
+            iaddr = int(iaddr, 16)
+            daddr = int(daddr, 16) & ~(align - 1)
+            cluster_idx = np.argmin(np.abs(cluster_centroids - daddr))
+            delta = cluster_centroids[cluster_idx] - daddr
+            if abs(delta) <= width:
+                raw_data.append((iaddr, idx, rw, daddr, cluster_idx, delta))
+                idx += 1
+
+    return pd.DataFrame(raw_data, columns=("iaddr", "idx", "rw", "daddr",
+                                           "cluster", "delta"))
+
 def main():
     args = init_args()
     logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
     logger = logging.getLogger()
 
-    all_data = parse_misses(args.infile, args.t)
-    samples, weights = miss_samples(all_data)
+    dcache_data_dict = parse_misses(args.dcache, args.t)
+    samples, weights = miss_samples(dcache_data_dict)
     clusters, cluster_sizes, cluster_centroids = \
         miss_cluster(samples, weights, args.w * 8, args.t)
+    print([hex(c) for c in cluster_centroids])
 
     # Align centroids to 64-byte (cache line) boundary
     cluster_centroids = align_addrs(cluster_centroids, 64)
+    print([hex(c) for c in cluster_centroids])
     dense_inds = np.argpartition(cluster_sizes, -args.n)[-args.n:]
 
     logger.info("Calculated %d most dense clusters using DBSCAN", args.n)
@@ -206,7 +254,11 @@ def main():
         logger.info("Found cluster @0x%x with size %d", dense_cluster_centroid,
                     dense_cluster_size)
 
-    separated_data = separate_clusters(samples, cluster_centroids[dense_inds], args.w)
+    dense_cluster_centroids = cluster_centroids[dense_inds]
+
+    access_df = parse_accesses(args.atrace, cluster_centroids, args.w * 8, 64)
+    fig = violin_misses(access_df, cluster_centroids)
+    plt.show()
 
 if __name__ == "__main__":
     main()

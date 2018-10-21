@@ -50,6 +50,8 @@ END_LEGAL */
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE,    "pintool",
     "o", "dcache.out", "specify dcache file name");
+KNOB<string> KnobTraceFile(KNOB_MODE_WRITEONCE,    "pintool",
+    "o", "atrace.out", "specify access trace file name");
 KNOB<BOOL>   KnobTrackLoads(KNOB_MODE_WRITEONCE,    "pintool",
     "tl", "0", "track individual loads -- increases profiling time");
 KNOB<BOOL>   KnobTrackStores(KNOB_MODE_WRITEONCE,   "pintool",
@@ -82,6 +84,9 @@ INT32 Usage()
 
 /* ===================================================================== */
 /* Global Variables */
+
+std::ofstream tracestream;
+
 /* ===================================================================== */
 
 // wrap configuation constants into their own name space to avoid name clashes
@@ -263,6 +268,18 @@ VOID StoreSingleFast(ADDRINT addr)
     dl1->AccessSingleLine(addr, CACHE_BASE::ACCESS_TYPE_STORE);
 }
 
+// Print a memory read record
+VOID RecordMemRead(VOID * ip, VOID * addr)
+{
+    tracestream << ip << ": R " << addr << "\n";
+}
+
+// Print a memory write record
+VOID RecordMemWrite(VOID * ip, VOID * addr)
+{
+    tracestream << ip << ": W " << addr << "\n";
+}
+
 
 
 /* ===================================================================== */
@@ -284,6 +301,12 @@ VOID Instruction(INS ins, void * v)
         {
             if( KnobTrackLoads )
             {
+                INS_InsertPredicatedCall(
+                    ins, IPOINT_BEFORE, (AFUNPTR)RecordMemRead,
+                    IARG_INST_PTR,
+                    IARG_MEMORYOP_EA, memOp,
+                    IARG_END);
+
                 // map sparse INS addresses to dense IDs
                 const ADDRINT iaddr = INS_Address(ins);
                 const UINT32 instId = profile.Map(iaddr);
@@ -333,6 +356,12 @@ VOID Instruction(INS ins, void * v)
         {
             if( KnobTrackStores )
             {
+                INS_InsertPredicatedCall(
+                    ins, IPOINT_BEFORE, (AFUNPTR)RecordMemWrite,
+                    IARG_INST_PTR,
+                    IARG_MEMORYOP_EA, memOp,
+                    IARG_END);
+
                 const ADDRINT iaddr = INS_Address(ins);
                 const UINT32 instId = profile.Map(iaddr);
 
@@ -446,6 +475,8 @@ int main(int argc, char *argv[])
     threshold[COUNTER_MISS] = KnobThresholdMiss.Value();
 
     profile.SetThreshold( threshold );
+
+    tracestream.open(KnobTraceFile.Value().c_str());
 
     INS_AddInstrumentFunction(Instruction, 0);
     PIN_AddFiniFunction(Fini, 0);
