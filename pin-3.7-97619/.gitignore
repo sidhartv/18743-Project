@@ -1,0 +1,3 @@
+# Build Directories
+obj-intel64/
+obj-ia32/
