@@ -21,7 +21,7 @@ def fit_network(model, in_data, out_data):
     times,samples = in_data.shape
     in_data = in_data.reshape((times,1,samples))
 
-    model.fit(in_data, out_data, epochs=100)
+    model.fit(in_data, out_data, epochs=10)
     return model
 
 
@@ -41,22 +41,33 @@ def parse_df(df):
 
     in_iaddr = df['iaddr'].values[:-1].reshape(-1,1)
     in_cluster = df['cluster'].values[:-1].reshape(-1,1)
-    in_data = np.concatenate((in_iaddr, in_cluster, in_deltas), axis=1)
-
+    #in_data = np.concatenate((in_iaddr, in_cluster, in_deltas), axis=1)
+    in_data = np.concatenate((in_iaddr, in_deltas), axis=1)
     out_cluster = df['cluster'].values[1:].reshape(-1,1)
-    out_data = np.concatenate((out_cluster, out_deltas), axis=1)
+    #out_data = np.concatenate((out_cluster, out_deltas), axis=1)
+    out_data = out_deltas
     return (in_data, out_data)
 
 def main():
     args = parse_args()
 
     df = pd.read_csv(args.input_file)
-    in_data, out_deltas = parse_df(df)
+    in_data, out_data = parse_df(df)
 
-    _, n_input = in_data.shape
+    n_samples, n_input = in_data.shape
+
+    div_pt = int(0.75 * n_samples)
+    in_train = in_data[:div_pt]
+    out_train = out_data[:div_pt]
+
+    in_test = in_data[div_pt:]
+    out_test = out_data[div_pt:]
+
+    in_times, in_samples = in_test.shape
 
     model = create_network(n_input)
-    trained_model = fit_network(model, in_data, out_deltas)
+    trained_model = fit_network(model, in_train, out_train)
+    trained_model.evaluate(in_test.reshape(in_times, 1, in_samples), out_test)
 
 if __name__ == '__main__':
     main()
