@@ -26,6 +26,7 @@ def init_args():
     parser.add_argument("-w", type=int, help="Maximum width of clusters (8-byte words)",
                         default=64)
     parser.add_argument("-t", type=int, help="Min. miss threhold", default=10)
+    parser.add_argument("--pd-outfile", type=str)
 
     return parser.parse_args()
 
@@ -259,6 +260,8 @@ def main():
     access_df = parse_accesses(args.atrace, dense_cluster_centroids, args.w * 8, 64)
     fig = violin_misses(access_df)
     plt.show()
+
+    access_df.to_csv(args.pd_outfile)
 
 if __name__ == "__main__":
     main()
