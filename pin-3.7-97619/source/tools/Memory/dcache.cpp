@@ -36,6 +36,7 @@ END_LEGAL */
 #include "pin.H"
 
 #include <cassert>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 
