@@ -28,15 +28,19 @@ def init_args():
                         help="Path to dcache.out of benchmark")
     parser.add_argument("--atrace", type=argparse.FileType("rb"),
                         help="Path to atrace.out of benchmark")
-    parser.add_argument("-o", "--outfile", type=str,
-                        help="Path to cluster.out of benchmark")
 
     parser.add_argument("-n", type=int, default=8, help="Number of clusters")
     parser.add_argument("-w", type=int, default=8,
                         help="Maximum width of clusters in cache blocks")
     parser.add_argument("-t", type=int, default=10, help="Min. miss threhold")
-    parser.add_argument("--pd-outfile", type=str)
-    parser.add_argument("--violin-outfile", type=str)
+
+    parser.add_argument("--logfile", type=str, help="Path to logfile")
+    parser.add_argument("-o", "--outfile", type=str,
+                        help="Path to output file for CSV-formatted clusters")
+    parser.add_argument("--test-outfile", type=str,
+                        help="Path to output file for CSV-formatted test data")
+    parser.add_argument("--violin-outfile", type=str,
+                        help="Path to output file for Violin plots")
 
     args = parser.parse_args()
 
@@ -89,9 +93,9 @@ def violin_misses(df):
 
 def main():
     args = init_args()
-    if args.outfile:
+    if args.logfile:
         logging.basicConfig(format="%(levelname)s: %(message)s",
-                            level=logging.DEBUG, filename=args.outfile)
+                            level=logging.DEBUG, filename=args.logfile)
     else:
         logging.basicConfig(format="%(levelname)s: %(message)s",
                             level=logging.DEBUG)
@@ -122,12 +126,20 @@ def main():
     access_df = lc.parse_accesses(args.atrace, dense_cluster_centroids,
                                   args.w * blocksize, blocksize)
 
+    if args.outfile:
+        cluster_df = pd.DataFrame({
+            "centroid": cluster_centroids[dense_inds],
+            "size": cluster_sizes[dense_inds]
+        })
+
+        cluster_df.to_csv("cluster.csv")
+
     if args.violin_outfile:
         fig = violin_misses(access_df)
         fig.savefig(args.violin_outfile)
 
-    if args.pd_outfile:
-        access_df.to_csv(args.pd_outfile)
+    if args.test_outfile:
+        access_df.to_csv("test_data.csv")
 
 if __name__ == "__main__":
     main()
