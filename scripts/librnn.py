@@ -5,15 +5,12 @@ import sys
 import keras
 import numpy as np
 import pandas as pd
-import sklearn.preprocessing
 
+# x86-64 cache block size is 512-bytes and word size is 8-bytes
 blocksize = np.uint64(512)
 wordsize = np.uint64(8)
 
-# Maximum width of clusters in cache blocks
-width = 8
-
-def import_clusters(fname = "cluster.out"):
+def import_clusters(fname="cluster.out"):
     cluster_df = pd.read_csv(fname)
     return cluster_df
 
@@ -21,32 +18,24 @@ def import_tests(fname="test_data.csv"):
     test_df = pd.read_csv(fname)
     return test_df
 
-def parse_tests(test_df):
+def parse_tests(test_df, cluster_df, n_delta_bits):
     logger = logging.getLogger()
 
-    # Convert clusters to categorical representation
-    cluster_lab_enc = sklearn.preprocessing.LabelEncoder()
-    clusters_labeled = cluster_lab_enc.fit_transform(test_df["cluster"])
+    n_cluster_bits = len(cluster_df)
 
-    # Convert clusters to one-hot representation
-    cluster_1h_enc = sklearn.preprocessing.OneHotEncoder(sparse=False)
-    cluster_1h_enc.fit(clusters_labeled.reshape(-1, 1))
-
-    # Convert deltas to categorical representation
-    delta_lab_enc = sklearn.preprocessing.LabelEncoder()
-    deltas_labeled = delta_lab_enc.fit_transform(test_df["delta"])
-
-    # Convert categorical deltas to one-hot representation
-    delta_1h_enc = sklearn.preprocessing.OneHotEncoder(sparse=False)
-    delta_1h_enc.fit(deltas_labeled.reshape(-1, 1))
+    max_delta = test_df["delta"].max()
+    max_delta_blocks = (max_delta + blocksize - 1) // blocksize
+    if (max_delta_blocks + 1 > n_delta_bits):
+        logger.error("%d is not enough bits to encode the max block offset " \
+                     "of %d".format(n_delta_bits, max_delta_blocks))
+        sys.exit(1)
 
     inputs = {}
     outputs = {}
 
-    for name, group in test_df.groupby("cluster"):
-        cluster_lab = cluster_lab_enc.transform([name])
-        cluster_1h = cluster_1h_enc.transform(cluster_lab.reshape(1, -1))
-        clusters_1h = np.repeat(cluster_1h, len(group), axis=0)
+    for cluster, group in test_df.groupby("cluster"):
+        clusters_1h = np.zeros((len(group), n_cluster_bits), dtype=np.uint8)
+        clusters_1h[:, cluster] = np.uint8(1)
 
         # Convert uint64 instruction addresses to unpacked bits
         '''
@@ -55,25 +44,25 @@ def parse_tests(test_df):
         '''
         iaddrs = group["iaddr"].values
 
-        deltas_lab = delta_lab_enc.transform(group["delta"])
-        deltas_1h = delta_1h_enc.transform(deltas_lab.reshape(-1, 1))
+        delta_blocks = (group["delta"] + blocksize - 1) // blocksize
+        deltas_1h = np.zeros((len(group), n_delta_bits), dtype=np.uint8)
+        deltas_1h[:, delta_blocks + 1] = np.uint8(1)
 
         # Prefetch prediction is on the next delta so just shift the values by 1
-        inputs[name] = np.hstack((clusters_1h[:-1],
-                                  iaddrs[:-1].reshape(-1, 1),
-                                  deltas_1h[:-1]))
-        outputs[name] = deltas_1h[1:]
+        inputs[cluster] = np.hstack((clusters_1h[:-1],
+                                     iaddrs[:-1].reshape(-1, 1),
+                                     deltas_1h[:-1]))
+        outputs[cluster] = deltas_1h[1:]
 
-        logger.info("Successfully encoded data for cluster %d: %d items", name,
-                    len(group))
+        logger.info("Successfully encoded data for cluster %d: %d items",
+                    cluster, len(group))
 
-    n_delta_bits = len(delta_1h_enc.categories_[0])
-    return (inputs, outputs, n_delta_bits)
+    return (inputs, outputs)
 
-def create_network(n_dct_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
+def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
     logger = logging.getLogger()
 
-    cluster_input = keras.layers.Input(shape=(1, n_dct_clusters))
+    cluster_input = keras.layers.Input(shape=(1, n_clusters))
 
     iaddr_input = keras.layers.Input(shape=(1, 1))
     iaddr_emb = keras.layers.Embedding(n_dct_iaddrs, iaddr_emb_len)(iaddr_input)
@@ -83,7 +72,7 @@ def create_network(n_dct_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
     input_cat = keras.layers.concatenate([cluster_input, iaddr_input,
                                           delta_input])
 
-    lstm_bits = n_dct_clusters + n_dct_iaddrs + n_delta_bits
+    lstm_bits = n_clusters + n_dct_iaddrs + n_delta_bits
     lstm1 = keras.layers.LSTM(n_delta_bits,
                               input_shape=(1, lstm_bits),
                               return_sequences=True)(input_cat)
@@ -102,13 +91,33 @@ def fit_network(model, in_data, out_data):
 
     return model
 
-def save_weights(model, weights_fname):
+def save_weights(model, weights_fname="weights.h5"):
     logger = logging.getLogger()
-    logger.info("Saving model weights to {}".format(model_fname))
-    model.save_weights(model_fname)
-    logging.info("\t> Successfully saved model")
 
-def load_weights(model, weights_fname):
+    logger.info("Saving model weights to {}".format(weights_fname))
+    model.save_weights(weights_fname)
+    logging.info("\t> Successfully saved model to {}".format(weights_fname))
+
+def load_weights(model, weights_fname="weights.h5"):
     logger = logging.getLogger()
-    logger.info("Loading weights from {}".format(model_fname))
+
     model.load_weights(weights_fname)
+    logging.info("\t> Successfully loaded weights from " \
+                 "{}".format(weights_fname))
+
+def save_arch(model, arch_fname="model.json"):
+    logger = logging.getLogger()
+
+    logger.info("Saving model architecture to {}".format(arch_fname))
+    fout = open(arch_fname, "w")
+    fout.write(model.to_json())
+    fout.close()
+    logging.info("\t> Successfully saved model architecture to " \
+                 "{}".format(arch_fname))
+
+def load_arch(arch_fname="model.json"):
+    logger = logging.getLogger()
+
+    model = keras.models.model_from_json(arch_fname)
+    logging.info("\t> Successfully loaded model architecture from" \
+                 "{}".format(arch_fname))
