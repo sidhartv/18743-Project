@@ -133,6 +133,12 @@ def config_cache(options, system):
             system.cpu[i].addPrivateSplitL1Caches(icache, dcache,
                                                   iwalkcache, dwalkcache)
 
+            if options.l1d_pref:
+                degree = options.l1d_pref_degree
+                system.cpu[i].dcache.prefetcher = TaggedPrefetcher(on_miss=True,
+                                                                   latency=1,
+                                                                   degree=degree)
+
             if options.memchecker:
                 # The mem_side ports of the caches haven't been connected yet.
                 # Make sure connectAllPorts connects the right objects.

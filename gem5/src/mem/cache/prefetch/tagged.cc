@@ -37,10 +37,74 @@
 
 #include "params/TaggedPrefetcher.hh"
 
+#include "debug/PyHook.hh"
+
+// Static variable definitions
+const char TaggedPrefetcher::modpath[] = \
+          "/afs/ece/usr/dstiffle/Private/ece/18743-Project/scripts/";
+const char TaggedPrefetcher::modname[] = "testmodule";
+const char TaggedPrefetcher::initfn_name[] = "init";
+const char TaggedPrefetcher::testfn_name[] = "test";
+const char TaggedPrefetcher::inferfn_name[] = "infer";
+
 TaggedPrefetcher::TaggedPrefetcher(const TaggedPrefetcherParams *p)
     : QueuedPrefetcher(p), degree(p->degree)
 {
+  /* Py_SetProgramName(*name*);  // NOTE: this is optional but recommended */
+  Py_Initialize();  // Start the embedded interpreter
+  if (!Py_IsInitialized()) {
+    PyErr_Print();
+    DPRINTF(PyHook, "ERR> Python environment was not initialized properly.\n");
+    exit(EXIT_FAILURE);
+  }
 
+  DPRINTF(PyHook, "Setting up PYTHONPATH.\n");
+  PyObject *py_sys_mod = PyImport_ImportModule("sys");
+  PyObject *py_syspath = PyObject_GetAttrString(py_sys_mod, "path");
+  PyList_Append(py_syspath, PyString_FromString(modpath));
+  Py_DECREF(py_syspath);
+  Py_DECREF(py_sys_mod);
+
+  DPRINTF(PyHook, "Attempting to import module -%s-\n", modname);
+  pModule = PyImport_ImportModule(modname);
+  if (pModule != nullptr) {
+    DPRINTF(PyHook, "Successfully imported module -%s- @(%p)\n",
+            modname, (void *) pModule);
+
+    pFn_test = PyObject_GetAttrString(pModule, testfn_name);
+    if ((pFn_test != nullptr) && PyCallable_Check(pFn_test)) {
+      DPRINTF(PyHook, "Successfully registered function hook -%s.%s- @(%p)\n",
+              modname, testfn_name, (void *) pFn_test);
+
+      PyObject *pArgs = PyTuple_New(2);
+      PyTuple_SetItem(pArgs, 0, PyInt_FromLong(18743));
+      PyTuple_SetItem(pArgs, 1, PyInt_FromLong(0xdeadbeef));
+
+      DPRINTF(PyHook, "Successfully built function arguments @(%p)\n",
+              (void *) pArgs);
+
+      PyObject *ret = PyObject_CallObject(pFn_test, pArgs);
+      DPRINTF(PyHook, "Result of calling -%s.%s-: %d\n",
+              modname, testfn_name, PyInt_AsLong(ret));
+      Py_DECREF(pArgs);
+      Py_DECREF(ret);
+    }
+  } else {
+    PyErr_Print();
+    DPRINTF(PyHook, "ERR> Unable to import module.\n");
+    exit(EXIT_FAILURE);
+  }
+}
+
+TaggedPrefetcher::~TaggedPrefetcher() {
+  if (pModule != nullptr) {
+    Py_DECREF(pFn_init);
+    Py_DECREF(pFn_infer);
+
+    Py_DECREF(pModule);
+  }
+
+  Py_Finalize();
 }
 
 void

@@ -36,6 +36,9 @@
 #ifndef __MEM_CACHE_PREFETCH_TAGGED_HH__
 #define __MEM_CACHE_PREFETCH_TAGGED_HH__
 
+// Embedded Python2.7 interpreter
+#include <Python.h>
+
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
 
@@ -44,12 +47,21 @@ struct TaggedPrefetcherParams;
 class TaggedPrefetcher : public QueuedPrefetcher
 {
   protected:
+      static const char modpath[];
+      static const char modname[];
+      static const char initfn_name[];
+      static const char testfn_name[];
+      static const char inferfn_name[];
+
+  protected:
       int degree;
+      PyObject *pModule;
+      PyObject *pFn_test, *pFn_init, *pFn_infer;
 
   public:
     TaggedPrefetcher(const TaggedPrefetcherParams *p);
 
-    ~TaggedPrefetcher() {}
+    ~TaggedPrefetcher();
 
     void calculatePrefetch(const PacketPtr &pkt,
                            std::vector<AddrPriority> &addresses);

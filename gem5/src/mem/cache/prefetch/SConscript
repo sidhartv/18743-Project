@@ -37,3 +37,5 @@ Source('queued.cc')
 Source('stride.cc')
 Source('tagged.cc')
 
+DebugFlag('PyHook')
+
