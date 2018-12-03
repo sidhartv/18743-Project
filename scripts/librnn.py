@@ -65,33 +65,38 @@ def parse_tests(test_df, cluster_df, n_delta_bits):
 def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
     logger = logging.getLogger()
 
-    cluster_input = keras.layers.Input(shape=(1, n_clusters))
+    for ci in range(n_clusters):
+        iaddr_input = keras.layers.Input(shape=(1,1))
 
-    iaddr_input = keras.layers.Input(shape=(1, 1))
-    iaddr_emb = keras.layers.Embedding(n_dct_iaddrs, iaddr_emb_len)(iaddr_input)
+        iaddr_emb = keras.layers.Embedding(n_dct_iaddrs, iaddr_emb_len)(iaddr_input)
+        delta_input = keras.layers.Input(shape=(1, n_delta_bits))(iaddr_input)
 
-    delta_input = keras.layers.Input(shape=(1, n_delta_bits))
+        input_cat = keras.layers.concatenate([iaddr_input, delta_input])
 
-    input_cat = keras.layers.concatenate([cluster_input, iaddr_input,
-                                          delta_input])
+        lstm_bits = n_clusters + n_dct_iaddrs + n_delta_bits
+        lstm1 = keras.layers.LSTM(n_delta_bits, input_shape=(1,lstm_bits), return_sequences=True)(input_cat)
+        lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
+        softmax = keras.layers.Activation('softmax')(lstm2)
 
-    lstm_bits = n_clusters + n_dct_iaddrs + n_delta_bits
-    lstm1 = keras.layers.LSTM(n_delta_bits,
-                              input_shape=(1, lstm_bits),
-                              return_sequences=True)(input_cat)
-    lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
-    softmax = keras.layers.Activation("softmax")(lstm2)
+        logger.info(model.summary())
+        model.compile(loss='mean_squared_error', optimizer='adam')
 
-    model = keras.models.Model(inputs=[cluster_input, iaddr_input, delta_input],
-                               outputs=softmax)
+        models.append(model)
 
-    logger.info(model.summary())
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    return model
+    weight_ties = dict()
+    for ci in range(n_clusters):
+        weight_ties[ci] = []
+        for cj in range(n_clusters):
+            if ci == cj:
+                continue
+            for Wi,Wj in zip(models[ci].trainable_weights, models[cj].trainable_weights):
+                weight_ties[ci].append(tf.assign(Wj, Wi))
 
-def fit_network(model, in_data, out_data):
+
+    return models, weight_ties
+
+def fit_network(model, in_data, out_data, weight_ties):
     model.fit(in_data, out_data, epochs=5)
-
     return model
 
 def save_weights(model, weights_fname="weights.h5"):
