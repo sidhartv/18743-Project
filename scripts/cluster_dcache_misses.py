@@ -1,5 +1,5 @@
-from __future__ import print_function
-from __future__ import division
+#  from __future__ import print_function
+#  from __future__ import division
 
 import libcluster as lc
 import argparse
@@ -9,10 +9,10 @@ import re
 import sys
 import tarfile
 
-import matplotlib.pyplot as plt
+#  import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
+#  import seaborn as sns
 from sklearn import metrics
 from sklearn.cluster import DBSCAN
 
@@ -134,9 +134,11 @@ def main():
 
         cluster_df.to_csv("cluster.csv")
 
+    '''
     if args.violin_outfile:
         fig = violin_misses(access_df)
         fig.savefig(args.violin_outfile)
+    '''
 
     if args.test_outfile:
         access_df.to_csv("test_data.csv")
