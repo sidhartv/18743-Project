@@ -35,7 +35,6 @@ def main():
                         level=logging.DEBUG)
 
     args = parse_args()
-
     logger = logging.getLogger()
 
     test_df = lr.import_tests(args.test_data)
@@ -66,7 +65,6 @@ def main():
         lr.save_weights(trained_model, args.weights_file)
         logging.info("Successfully saved weights to file" \
                      "{}".format(args.weights_file))
-
     if not args.no_save and args.arch_file:
         lr.save_model(trained_model, args.arch_file)
         logging.info("Successfully saved architecture to file" \
