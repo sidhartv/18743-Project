@@ -25,9 +25,12 @@ def parse_tests(test_df, cluster_df, n_delta_bits):
 
     max_delta = test_df["delta"].max()
     max_delta_blocks = (max_delta + blocksize - 1) // blocksize
+    logger.info("Interpreting deltas ... max_delta(%d) " \
+                "max_delta_blocks(%d)", max_delta, max_delta_blocks)
+
     if (max_delta_blocks + 1 > n_delta_bits):
         logger.error("%d is not enough bits to encode the max block offset " \
-                     "of %d".format(n_delta_bits, max_delta_blocks))
+                     "of %d", n_delta_bits, max_delta_blocks)
         sys.exit(1)
 
     inputs = {}
@@ -44,9 +47,9 @@ def parse_tests(test_df, cluster_df, n_delta_bits):
         '''
         iaddrs = group["iaddr"].values
 
-        delta_blocks = (group["delta"] + blocksize - 1) // blocksize
+        delta_blocks = (group["delta"].values + blocksize - 1) // blocksize
         deltas_1h = np.zeros((len(group), n_delta_bits), dtype=np.uint8)
-        deltas_1h[:, delta_blocks + 1] = np.uint8(1)
+        deltas_1h[np.arange(deltas_1h.shape[0]), delta_blocks + 1] = np.uint8(1)
 
         # Prefetch prediction is on the next delta so just shift the values by 1
         inputs[cluster] = np.hstack((clusters_1h[:-1],
