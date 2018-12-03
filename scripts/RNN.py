@@ -1,73 +1,83 @@
+import logging
+
 import keras
 import pandas as pd
 import argparse
 import sklearn.preprocessing
 import numpy as np
+
+import librnn as lr
+
+# x86-64 cache block size is 512-bytes and word size is 8-bytes
+blocksize = np.uint64(512)
+wordsize = np.uint64(8)
+
+# Maximum width of clusters in cache blocks (inc 0)
+n_delta_bits = 8 + 1
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run RNN")
-    parser.add_argument("--input-file", type=str, help="Input Pandas DataFrame to parse")
+    parser.add_argument("--test_data", type=str, default="test_data.csv",
+                        help="Input Pandas DataFrame to parse for data (CSV format)")
+    parser.add_argument("--cluster_data", type=str, default="cluster.out",
+                        help="Input Pandas DataFrame to parse for clusters (CSV format)")
+
+    parser.add_argument("--no_save", action="store_true")
+    parser.add_argument("--weights_file", type=str, default="weights.h5",
+                        help="Output weights file (HDF5 format)")
+    parser.add_argument("--arch_file", type=str, default="model.json",
+                        help="Output architecture file (JSON format)")
+
     return parser.parse_args()
 
-def create_network(n_categories):
-    model = keras.models.Sequential()
-    model.add(keras.layers.LSTM(n_categories-1, input_shape=(1,n_categories), activation='softmax'))
-    model.compile(loss='mean_squared_error', optimizer='adam')
-
-    return model
-
-
-
-def fit_network(model, in_data, out_data):
-    times,samples = in_data.shape
-    in_data = in_data.reshape((times,1,samples))
-
-    model.fit(in_data, out_data, epochs=10)
-    return model
-
-
-
-def parse_df(df):
-    freqs = df['delta'].value_counts()
-    freqs = freqs[freqs > 10]
-
-    # Convert deltas to one-hot representation
-    label_encoder = sklearn.preprocessing.LabelEncoder()
-    deltas_labeled = label_encoder.fit_transform(df['delta'].values)
-    onehot_encoder = sklearn.preprocessing.OneHotEncoder(sparse=False)
-    deltas_onehot = onehot_encoder.fit_transform(deltas_labeled.reshape(-1,1))
-
-    in_deltas = deltas_onehot[:-1]
-    out_deltas = deltas_onehot[1:]
-
-    in_iaddr = df['iaddr'].values[:-1].reshape(-1,1)
-    in_cluster = df['cluster'].values[:-1].reshape(-1,1)
-    #in_data = np.concatenate((in_iaddr, in_cluster, in_deltas), axis=1)
-    in_data = np.concatenate((in_iaddr, in_deltas), axis=1)
-    out_cluster = df['cluster'].values[1:].reshape(-1,1)
-    #out_data = np.concatenate((out_cluster, out_deltas), axis=1)
-    out_data = out_deltas
-    return (in_data, out_data)
-
 def main():
+    logging.basicConfig(format="%(levelname)s: %(message)s",
+                        level=logging.DEBUG)
+
     args = parse_args()
+    logger = logging.getLogger()
 
-    df = pd.read_csv(args.input_file)
-    in_data, out_data = parse_df(df)
+    test_df = lr.import_tests(args.test_data)
+    cluster_df = lr.import_clusters(args.cluster_data)
+    logger.info("Finished loading test data and cluster information.")
+    in_data, out_data = lr.parse_tests(test_df, cluster_df, n_delta_bits)
 
-    n_samples, n_input = in_data.shape
+    n_clusters = len(cluster_df)
+    n_dct_iaddrs = test_df["iaddr"].nunique()
 
-    div_pt = int(0.75 * n_samples)
-    in_train = in_data[:div_pt]
-    out_train = out_data[:div_pt]
+    in_data_stacked = np.vstack(v for _, v in sorted(in_data.items()))
+    out_data_stacked = np.vstack(v for _, v in sorted(out_data.items()))
 
-    in_test = in_data[div_pt:]
-    out_test = out_data[div_pt:]
+    model = lr.create_network(n_clusters, n_dct_iaddrs, 4, n_delta_bits)
 
-    in_times, in_samples = in_test.shape
+    times, features = in_data_stacked.shape
+    cluster_inputs = in_data_stacked[:, 0:n_clusters].reshape(times, 1,
+                                                                 n_clusters)
+    iaddr_inputs = in_data_stacked[:, n_clusters].reshape(times, 1,
+                                                              1)
+    delta_inputs = in_data_stacked[:, n_clusters+1:].reshape(times, 1,
+                                                                 n_delta_bits)
 
-    model = create_network(n_input)
-    trained_model = fit_network(model, in_train, out_train)
-    trained_model.evaluate(in_test.reshape(in_times, 1, in_samples), out_test)
+    trained_model = lr.fit_network(model, [cluster_inputs, iaddr_inputs,
+                                           delta_inputs], [out_data_stacked])
 
-if __name__ == '__main__':
+    if not args.no_save and args.weights_file:
+        lr.save_weights(trained_model, args.weights_file)
+        logging.info("Successfully saved weights to file" \
+                     "{}".format(args.weights_file))
+    if not args.no_save and args.arch_file:
+        lr.save_model(trained_model, args.arch_file)
+        logging.info("Successfully saved architecture to file" \
+                     "{}".format(args.arch_file))
+
+def load_model(arch_fname="model.json", weights_fname="weights.h5"):
+    model = lr.load_arch(arch_fname)
+    lr.load_weights(model, weights_fname)
+
+    return model
+
+def infer(model, cluster_df):
+    pass
+
+if __name__ == "__main__":
     main()

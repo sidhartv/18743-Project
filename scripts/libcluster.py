@@ -61,14 +61,6 @@ def parse_load_store(lines):
 
     return data_dict
 
-def get_fsize(infile):
-    orig_pos = infile.tell()
-    infile.seek(0, 2)
-    fsize = infile.tell()
-    infile.seek(orig_pos, 0)
-
-    return fsize
-
 def parse_accesses(infile, cluster_centroids, width, align):
     """
     0x7f9fbb809ff3 0x7fffcf848bb8 0
