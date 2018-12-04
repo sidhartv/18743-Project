@@ -84,11 +84,11 @@ def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
         lstm_in = keras.layers.Reshape((1,lstm_bits))(input_cat)
         lstm1 = keras.layers.LSTM(n_delta_bits, return_sequences=True)(lstm_in)
         lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
-        softmax = keras.layers.Activation('softmax')(lstm2)
+        sigmoid = keras.layers.Activation('sigmoid')(lstm2)
 
-        model = keras.models.Model(inputs=[iaddr_input, delta_input], outputs=softmax)
+        model = keras.models.Model(inputs=[iaddr_input, delta_input], outputs=sigmoid)
         logger.info(model.summary())
-        model.compile(loss='mean_squared_error', optimizer='adam')
+        model.compile(loss='binary_crossentropy', optimizer='adam')
 
         models.append(model)
 
