@@ -83,12 +83,30 @@ def load_model(num_clusters, arch_fname="model.json", weights_prefix="weights"):
 def main():
     pass
 
-def chk_infer(test, cluster, width):
-    centroid = cluster_df['centroid'][cluster]
-    return centroid - width/2 <= test and test <= centroid + width/2
+def infer(iaddr, delta):
+    found_cluster = -1
+    for cluster in range(num_clusters):
+        cluster_center = cluster_df['centroid'][cluster]
+        cluster_min = cluster_center - cluster_width // 2
+        cluster_max = cluster_center + cluster_width // 2
 
-def infer():
-    pass
+        if iaddr >= cluster_min and iaddr <= cluster_max:
+            found_cluster = cluster
+            break
+
+    if found_cluster == -1:
+        return []
+    else:
+        predictions = []
+        targets = models[cluster].predict([iaddr, daddr])
+        for t in targets:
+            if t > 0.5:
+                predictions.append(t)
+
+        return predictions
+
+
+
 
 def init(clusters_file, arch_fname, weights_prefix):
     cluster_df = lr.import_clusters(clusters_file)

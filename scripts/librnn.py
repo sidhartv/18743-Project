@@ -77,10 +77,11 @@ def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len, n_delta_bits):
 
         delta_input = keras.layers.Input(shape=(n_delta_bits,))
 
+        #input_cat = keras.layers.concatenate([iaddr_emb, delta_input])
+
+        #lstm_bits = iaddr_emb_len + n_delta_bits
         input_cat = keras.layers.concatenate([iaddr_input, delta_input])
-
         lstm_bits = 1 + n_delta_bits
-
         lstm_in = keras.layers.Reshape((1,lstm_bits))(input_cat)
         lstm1 = keras.layers.LSTM(n_delta_bits, return_sequences=True)(lstm_in)
         lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
@@ -110,7 +111,7 @@ def fit_network(models, in_data, cluster_in_data, out_data, weight_ties):
     for i in range(cluster_in_data.shape[0]):
         cluster = cluster_in_data[i]
         input_data = [(in_data[0])[i,:].reshape(1,1), (in_data[1])[i,:].reshape(1,-1)]
-        models[cluster].fit(input_data, out_data[i,:].reshape(1,-1), epochs=5, verbose=0)
+        models[cluster].fit(input_data, out_data[i,:].reshape(1,-1), epochs=5, verbose=1)
     return models
 
 def predict(models, in_data, cluster_in_data):
