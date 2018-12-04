@@ -30,7 +30,7 @@ def parse_args():
 
     return parser.parse_args()
 
-def main():
+def create_and_train():
     logging.basicConfig(format="%(levelname)s: %(message)s",
                         level=logging.DEBUG)
 
@@ -60,9 +60,9 @@ def main():
                                                                  n_delta_bits)
 
     trained_models = lr.fit_network(models,
-                                    [iaddr_inputs, delta_inputs],
-                                    cluster_inputs,
-                                    out_data_stacked,
+            [iaddr_inputs[:5], delta_inputs[:5]],
+            cluster_inputs[:5],
+            out_data_stacked[:5],
                                     weight_tie)
 
     if not args.no_save and args.weights_file:
@@ -70,15 +70,32 @@ def main():
         logging.info("Successfully saved weights to file" \
                      "{}".format(args.weights_file))
     if not args.no_save and args.arch_file:
-        lr.save_models(trained_models, args.arch_file)
+        lr.save_arch(trained_models, args.arch_file)
         logging.info("Successfully saved architecture to file" \
                      "{}".format(args.arch_file))
 
-def load_model(arch_fname="model.json", weights_fname="weights.h5"):
-    model = lr.load_arch(arch_fname)
-    lr.load_weights(model, weights_fname)
+def load_model(num_clusters, arch_fname="model.json", weights_prefix="weights"):
+    model = lr.load_arch(num_clusters, arch_fname)
+    lr.load_weights(model, num_clusters, weights_fname)
 
     return model
 
+def main():
+    pass
+
+def chk_infer(test, cluster, width):
+    centroid = cluster_df['centroid'][cluster]
+    return centroid - width/2 <= test and test <= centroid + width/2
+
+def infer():
+    pass
+
+def init(clusters_file, arch_fname, weights_prefix):
+    cluster_df = lr.import_clusters(clusters_file)
+    num_clusters = len(cluster_df)
+    models = lr.load_arch(num_clusters, arch_fname)
+    lr.load_weights(models, num_clusters, weights_prefix)
+    return cluster_df, models
+
 if __name__ == "__main__":
-    main()
+    create_and_train()

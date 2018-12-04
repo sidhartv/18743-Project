@@ -132,7 +132,7 @@ def save_weights(models, weights_prefix="weights"):
         model.save_weights(weights_fname)
         logging.info("\t> Successfully saved model to {}".format(weights_fname))
 
-def load_weights(models, weights_prefix="weights"):
+def load_weights(models, num_clusters, weights_prefix="weights"):
     logger = logging.getLogger()
     for i in range(num_clusters):
         model = models[i]
