@@ -19,7 +19,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run RNN")
     parser.add_argument("--test_data", type=str, default="test_data.csv",
                         help="Input Pandas DataFrame to parse for data (CSV format)")
-    parser.add_argument("--cluster_data", type=str, default="cluster.out",
+    parser.add_argument("--cluster_data", type=str, default="cluster.csv",
                         help="Input Pandas DataFrame to parse for clusters (CSV format)")
 
     parser.add_argument("--no_save", action="store_true")
@@ -48,25 +48,29 @@ def main():
     in_data_stacked = np.vstack(v for _, v in sorted(in_data.items()))
     out_data_stacked = np.vstack(v for _, v in sorted(out_data.items()))
 
-    model = lr.create_network(n_clusters, n_dct_iaddrs, 4, n_delta_bits)
+    models,weight_tie = lr.create_network(n_clusters, n_dct_iaddrs, 4, n_delta_bits)
 
     times, features = in_data_stacked.shape
-    cluster_inputs = in_data_stacked[:, 0:n_clusters].reshape(times, 1,
-                                                                 n_clusters)
+    cluster_inputs = in_data_stacked[:, 0:n_clusters].reshape(times, n_clusters)
+
+    cluster_inputs = np.argmax(cluster_inputs, axis=1)
     iaddr_inputs = in_data_stacked[:, n_clusters].reshape(times, 1,
                                                               1)
     delta_inputs = in_data_stacked[:, n_clusters+1:].reshape(times, 1,
                                                                  n_delta_bits)
 
-    trained_model = lr.fit_network(model, [cluster_inputs, iaddr_inputs,
-                                           delta_inputs], [out_data_stacked])
+    trained_models = lr.fit_network(models,
+                                    [iaddr_inputs, delta_inputs],
+                                    cluster_inputs,
+                                    out_data_stacked,
+                                    weight_tie)
 
     if not args.no_save and args.weights_file:
-        lr.save_weights(trained_model, args.weights_file)
+        lr.save_weights(trained_models, args.weights_file)
         logging.info("Successfully saved weights to file" \
                      "{}".format(args.weights_file))
     if not args.no_save and args.arch_file:
-        lr.save_model(trained_model, args.arch_file)
+        lr.save_models(trained_models, args.arch_file)
         logging.info("Successfully saved architecture to file" \
                      "{}".format(args.arch_file))
 
@@ -76,7 +80,7 @@ def load_model(arch_fname="model.json", weights_fname="weights.h5"):
 
     return model
 
-def infer(model, cluster_df):
+def infer(models, cluster_df):
     pass
 
 if __name__ == "__main__":
