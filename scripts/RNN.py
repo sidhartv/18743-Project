@@ -80,8 +80,5 @@ def load_model(arch_fname="model.json", weights_fname="weights.h5"):
 
     return model
 
-def infer(models, cluster_df):
-    pass
-
 if __name__ == "__main__":
     main()
