@@ -60,10 +60,10 @@ def create_and_train():
                                                                  n_delta_bits)
 
     trained_models = lr.fit_network(models,
-            [iaddr_inputs[:5], delta_inputs[:5]],
-            cluster_inputs[:5],
-            out_data_stacked[:5],
-                                    weight_tie)
+            [iaddr_inputs, delta_inputs],
+            cluster_inputs,
+            out_data_stacked,
+            weight_tie)
 
     if not args.no_save and args.weights_file:
         lr.save_weights(trained_models, args.weights_file)
