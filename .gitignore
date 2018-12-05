@@ -35,3 +35,7 @@
 # Build Directories
 build/
 output/
+
+# User-Created Logging Files
+rnn.log
+pin.log

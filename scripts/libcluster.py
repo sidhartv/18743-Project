@@ -106,7 +106,7 @@ def parse_accesses(infile, cluster_centroids, width, align):
     for i, centroid in enumerate(cluster_centroids):
         cand_notset = np.logical_not(cluster_mask)
         logger.info("Evaluating %d candidates for cluster %d with centroid "
-                    "0x%x...", np.count_nonzero(cand_notset), i, centroid)
+                    "0x%0x...", np.count_nonzero(cand_notset), i, centroid)
 
         deltas = raw_data["daddr"].astype(np.int64) - np.int64(centroid)
         cand_matches = (np.abs(deltas) <= np.int64(width // 2))
@@ -245,7 +245,7 @@ def separate_clusters(raw_data, centroids, width):
         cluster_inds.append(deltas <= (width // 2))
 
         logger.info("Currently partitioning data for cluster %d with " \
-                    "centroid 0x%x\n"\
+                    "centroid 0x%0x\n"\
                     "\t> %d addresses grouped",
                     i, centroid, np.count_nonzero(cluster_inds))
 

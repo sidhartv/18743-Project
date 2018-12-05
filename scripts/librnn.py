@@ -30,6 +30,17 @@ def import_tests(fname="test_data.csv"):
     test_df = pd.read_csv(fname)
     return test_df
 
+def encode_deltas(deltas):
+    shape = deltas.shape
+
+    delta_blocks = (deltas + np.int64(blocksize - 1)) // np.int64(blocksize)
+
+    deltas_1h = np.zeros((shape[0], n_delta_bits), dtype=np.uint8)
+    shifts = delta_blocks + (n_delta_bits // 2)
+    deltas_1h[np.arange(shape[0]), shifts] = np.uint8(1)
+
+    return deltas_1h
+
 def parse_tests(test_df, cluster_df):
     logger = logging.getLogger()
 
@@ -61,10 +72,13 @@ def parse_tests(test_df, cluster_df):
         iaddrs= np.unpackbits(group["iaddr"].values.view(np.uint8), axis=1)
         '''
 
+        deltas_1h = encode_deltas(group["delta"].values)
+        '''
         delta_blocks = (group["delta"].values + np.int64(blocksize - 1)) // np.int64(blocksize)
 
         deltas_1h = np.zeros((len(group), n_delta_bits), dtype=np.uint8)
         deltas_1h[np.arange(len(group)), delta_blocks + n_delta_bits // 2] = np.uint8(1)
+        '''
 
         # Prefetch prediction is on the next delta so just shift the values by 1
         cluster_shifts = np.stack([clusters[i:i-unroll] for i in range(unroll)],

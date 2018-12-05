@@ -128,7 +128,7 @@ def main():
         dense_cluster_size = cluster_sizes[idx]
         dense_cluster_centroid = cluster_centroids[idx]
 
-        logger.info("Found cluster @0x%x with size %d",
+        logger.info("Found cluster @0x%0x with size %d",
                     dense_cluster_centroid, dense_cluster_size)
 
     dense_cluster_centroids = cluster_centroids[dense_inds]

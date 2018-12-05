@@ -100,7 +100,6 @@ def inferchk(iaddr, daddr_ual, is_read, rnn_handle):
     daddr = np.uint64(daddr_ual) & ~np.uint64(blocksize - 1)
 
     found_cluster = -1
-    found_delta = np.int64(0)
     thresh = 0.5
 
     deltas = np.int64(daddr) - cluster_df["centroid"].values.astype(np.int64);
@@ -114,41 +113,74 @@ def inferchk(iaddr, daddr_ual, is_read, rnn_handle):
 
     return np.any(abs_deltas <= max_cluster_width_bytes)
 
+infer_reqs = {}
 def infer(iaddr, daddr_ual, is_read, rnn_handle):
     cluster_df, models = rnn_handle
     daddr = np.uint64(daddr_ual) & ~np.uint64(blocksize - 1)
 
-    found_cluster = -1
-    found_delta = np.int64(0)
     thresh = 0.5
+    unroll = rnn_handle[1][0].input_shape[0][1]
 
-    for cluster in range(n_clusters):
-        cluster_center = cluster_df['centroid'][cluster]
-        delta = abs(np.int64(daddr) - np.int64(cluster_center))
+    deltas = np.int64(daddr) - cluster_df["centroid"].values.astype(np.int64);
+    found_cluster = np.argmin(np.abs(deltas))
+    found_delta = deltas[found_cluster]
 
-        cluster_min = cluster_center - cluster_width // 2
-        cluster_max = cluster_center + cluster_width // 2
+    if np.abs(found_delta) > max_cluster_width_bytes:
+        logging.warning("Attempted to perform inference on invalid access " \
+                        "for cluster(%d): iaddr(%0x) daddr(%0d) is_read(%d).",
+                        found_cluster, iaddr, daddr, is_read)
 
-        if delta <= cluster_width_bytes:
-            found_cluster = cluster
-            found_delta = delta
-            break
-
-    if found_cluster == -1:
         return []
     else:
-        return [cluster_df["centroid"][found_cluster]]
+        if found_cluster not in infer_reqs:
+            new_iaddrs = np.zeros((unroll, 1), dtype=np.uint64)
+            new_deltas = np.zeros((unroll, n_delta_bits), dtype=np.uint8)
+            infer_reqs[found_cluster] = [new_iaddrs, new_deltas]
 
-        delta_1h = np.zeros((1, n_delta_bits))
-        delta_1h[0, found_delta + n_delta_bits // 2] = np.uint8(1)
+            logging.info("Allocated new history stream for cluster(%d) with "\
+                         "iaddr(%0x) daddr(%0x)",
+                         found_cluster, iaddr, daddr)
 
-        iaddr_ar = np.array([[iaddr]], dtype=np.uint64)
+        delta_1h = lr.encode_deltas(np.array([found_delta]))
+
+        prev_iaddrs, prev_deltas = infer_reqs[found_cluster]
+        infer_reqs[found_cluster][0] = np.roll(prev_iaddrs, 1, axis=0)
+        infer_reqs[found_cluster][1] = np.roll(prev_deltas, 1, axis=0)
+        infer_reqs[found_cluster][0][-1] = iaddr
+        infer_reqs[found_cluster][1][-1] = delta_1h
+
+        if infer_reqs[found_cluster][0][0] == np.uint64(0):
+            logging.info("Still in the process of building history for" \
+                         "cluster(%d): %d/%d placeholders remaining.",
+                         found_cluster,
+                         np.count_nonzero(infer_reqs[found_cluster][0]),
+                         unroll)
+
+            return []
+
+        clusters_pred = np.full((unroll, 1), found_cluster, dtype=np.uint8)
+        iaddrs_pred, deltas_pred = infer_reqs[found_cluster]
+
+        pred_data = [clusters_pred.reshape(1, unroll, -1),
+                     iaddrs_pred.reshape(1, unroll, -1),
+                     deltas_pred.reshape(1, unroll, -1)]
+        targets = models[found_cluster].predict(pred_data)
+        targets = targets.reshape(n_delta_bits)
 
         predictions = []
-        targets = models[cluster].predict([iaddr_ar, delta_1h])
-        for t in targets:
+        for c, t in enumerate(targets):
             if t > thresh:
-                predictions.append(t)
+                infer_delta_blocks = c - (n_delta_bits // 2)
+                infer_delta = np.int64(infer_delta_blocks * blocksize)
+                infer_daddr = (np.int64(cluster_df["centroid"][found_cluster]) +
+                               infer_delta)
+
+                infer_daddr = np.uint64(infer_daddr)
+                predictions.append(long(infer_daddr))
+
+        logger.info("*NEW prefetch predictions for cluster(%d) len(%d):\n" \
+                    "*\t> %s.",
+                    found_cluster, len(predictions), str(predictions))
 
         return predictions
 
