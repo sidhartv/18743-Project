@@ -20,6 +20,10 @@ from sklearn.cluster import DBSCAN
 blocksize = np.uint64(512)
 wordsize = np.uint64(8)
 
+# Fixed maximum cluster width in cache blocks
+max_cluster_width = 8
+max_cluster_width_bytes = max_cluster_width * blocksize
+
 def init_args():
     parser = argparse.ArgumentParser(description="Determine miss clusters")
     parser.add_argument("datatar", nargs="?", type=argparse.FileType("rb"),
@@ -30,7 +34,7 @@ def init_args():
                         help="Path to atrace.out of benchmark")
 
     parser.add_argument("-n", type=int, default=8, help="Number of clusters")
-    parser.add_argument("-w", type=int, default=8,
+    parser.add_argument("-w", type=int, default=max_cluster_width,
                         help="Maximum width of clusters in cache blocks")
     parser.add_argument("-t", type=int, default=10, help="Min. miss threhold")
 
@@ -43,6 +47,12 @@ def init_args():
                         help="Path to output file for Violin plots")
 
     args = parser.parse_args()
+
+    if args.w > max_cluster_width:
+        print("Maximum cluster width is {} (saw {}).".format(max_cluster_width,
+                                                             args.w))
+
+        exit(1)
 
     if args.datatar:
         print("Reading in data from archive({}).".format(args.datatar))
@@ -107,7 +117,7 @@ def main():
     clusters, cluster_sizes, cluster_centroids = \
         lc.miss_cluster(samples, weights, args.w * blocksize, args.t)
 
-    # Align centroids to 64-byte (cache line) boundary
+    # Align centroids to 512-byte (cache line) boundary
     cluster_centroids = lc.align_addrs(cluster_centroids, blocksize)
     n_clusters = min(args.n, len(cluster_centroids))
     dense_inds = np.argpartition(cluster_sizes, -n_clusters)[-n_clusters:]
@@ -132,7 +142,7 @@ def main():
             "size": cluster_sizes[dense_inds]
         })
 
-        cluster_df.to_csv("cluster.csv")
+        cluster_df.to_csv(args.outfile)
 
     '''
     if args.violin_outfile:
@@ -141,7 +151,7 @@ def main():
     '''
 
     if args.test_outfile:
-        access_df.to_csv("test_data.csv")
+        access_df.to_csv(args.test_outfile)
 
 if __name__ == "__main__":
     main()

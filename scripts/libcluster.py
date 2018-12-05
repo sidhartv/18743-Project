@@ -9,6 +9,14 @@ import pandas as pd
 from sklearn import metrics
 from sklearn.cluster import DBSCAN
 
+# x86-64 cache block size is 512-bytes and word size is 8-bytes
+blocksize = np.uint64(512)
+wordsize = np.uint64(8)
+
+# Fixed maximum cluster width in cache blocks
+max_cluster_width = 8
+max_cluster_width_bytes = max_cluster_width * blocksize
+
 def parse_data_block(lines_view):
     data = {}
 
@@ -93,15 +101,15 @@ def parse_accesses(infile, cluster_centroids, width, align):
     raw_rw[raw_data["is_read"]] = "R"
 
     raw_clusters = np.full(raw_data.shape[0], -1, dtype=int)
-    raw_deltas = np.zeros(raw_data.shape[0], dtype=np.uint64)
+    raw_deltas = np.zeros(raw_data.shape[0], dtype=np.int64)
     cluster_mask = np.full(raw_data.shape[0], False, dtype=np.bool_)
     for i, centroid in enumerate(cluster_centroids):
         cand_notset = np.logical_not(cluster_mask)
         logger.info("Evaluating %d candidates for cluster %d with centroid "
                     "0x%x...", np.count_nonzero(cand_notset), i, centroid)
 
-        deltas = np.abs(raw_data["daddr"] - centroid)
-        cand_matches = (deltas < np.uint64(width))
+        deltas = raw_data["daddr"].astype(np.int64) - np.int64(centroid)
+        cand_matches = (np.abs(deltas) <= np.int64(width // 2))
         new_matches = cand_matches & cand_notset
 
         logger.info("... found %d/%d matches.",
@@ -190,7 +198,7 @@ def get_centroid(points):
     return np.sum(points) / points.shape[0]
 
 def get_nearest_point(points, value):
-    idx = np.abs(points - value).argmin()
+    idx = np.abs(points.astype(np.int64) - np.int64(value)).argmin()
     return points.flat[idx]
 
 def miss_cluster(miss_samples, miss_weights, width, thresh):
@@ -200,7 +208,8 @@ def miss_cluster(miss_samples, miss_weights, width, thresh):
                 "thresh(%d)",
                 str(miss_samples.shape), width, thresh)
 
-    db = DBSCAN(eps=width, min_samples=thresh)
+    width_bytes = width * blocksize
+    db = DBSCAN(eps=width_bytes, min_samples=thresh)
     db.fit(miss_samples, sample_weight=miss_weights)
 
     labels = db.labels_
@@ -232,7 +241,8 @@ def separate_clusters(raw_data, centroids, width):
     logger = logging.getLogger()
     cluster_inds = []
     for i, centroid in enumerate(centroids.flat):
-        cluster_inds.append(np.abs(raw_data - centroid) < width)
+        deltas = np.abs(raw_data.astype(np.int64) - np.int64(centroid))
+        cluster_inds.append(deltas <= (width // 2))
 
         logger.info("Currently partitioning data for cluster %d with " \
                     "centroid 0x%x\n"\
