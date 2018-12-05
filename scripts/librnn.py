@@ -20,6 +20,8 @@ max_cluster_width_bytes = max_cluster_width * blocksize
 # Maximum number of one-hot bits to encode deltas
 n_delta_bits = max_cluster_width + 1
 
+unroll = 2
+
 def import_clusters(fname="cluster.out"):
     cluster_df = pd.read_csv(fname)
     return cluster_df
@@ -46,7 +48,6 @@ def parse_tests(test_df, cluster_df):
 
     inputs = {}
     outputs = {}
-
     for cluster, group in test_df.groupby("cluster"):
         clusters = np.full((len(group), 1), cluster, dtype=np.uint8)
         '''
@@ -55,7 +56,7 @@ def parse_tests(test_df, cluster_df):
         '''
 
         # Convert uint64 instruction addresses to unpacked bits
-        iaddrs = group["iaddr"].values
+        iaddrs = group["iaddr"].values.reshape((-1, 1))
         '''
         iaddrs= np.unpackbits(group["iaddr"].values.view(np.uint8), axis=1)
         '''
@@ -66,10 +67,16 @@ def parse_tests(test_df, cluster_df):
         deltas_1h[np.arange(len(group)), delta_blocks + n_delta_bits // 2] = np.uint8(1)
 
         # Prefetch prediction is on the next delta so just shift the values by 1
-        inputs[cluster] = np.hstack((clusters[:-1],
-                                     iaddrs[:-1].reshape(-1, 1),
-                                     deltas_1h[:-1]))
-        outputs[cluster] = deltas_1h[1:]
+        cluster_shifts = np.stack([clusters[i:i-unroll] for i in range(unroll)],
+                                  axis=1)
+        iaddr_shifts = np.stack([iaddrs[i:i-unroll] for i in range(unroll)],
+                                axis=1)
+        deltas_1h_shifts = np.stack([deltas_1h[i:i-unroll] for i in
+                                     range(unroll)], axis=1)
+
+        inputs[cluster] = np.concatenate([cluster_shifts, iaddr_shifts,
+                                   deltas_1h_shifts], axis=2)
+        outputs[cluster] = deltas_1h[unroll:]
 
         logger.info("Successfully encoded data for cluster %d: %d items",
                     cluster, len(group))
@@ -82,28 +89,34 @@ def create_network(n_clusters, cluster_emb_len, n_dct_iaddrs, iaddr_emb_len):
     models = []
 
     for ci in range(n_clusters):
-        cluster_input = keras.layers.Input(shape=(1,))
+        cluster_input = keras.layers.Input(shape=(unroll, 1))
         cluster_emb = keras.layers.Embedding(n_clusters,
                                              cluster_emb_len)(cluster_input)
-        cluster_emb = keras.layers.Reshape((cluster_emb_len,))(cluster_emb)
+        cluster_emb = keras.layers.Reshape((unroll,
+                                            cluster_emb_len))(cluster_emb)
 
-        iaddr_input = keras.layers.Input(shape=(1,))
+        iaddr_input = keras.layers.Input(shape=(unroll, 1))
         iaddr_emb = keras.layers.Embedding(n_dct_iaddrs, iaddr_emb_len)(iaddr_input)
-        iaddr_emb = keras.layers.Reshape((iaddr_emb_len,))(iaddr_emb)
+        iaddr_emb = keras.layers.Reshape((unroll, iaddr_emb_len))(iaddr_emb)
 
-        delta_input = keras.layers.Input(shape=(n_delta_bits,))
+        delta_input = keras.layers.Input(shape=(unroll, n_delta_bits))
 
-        input_cat = keras.layers.concatenate([cluster_emb, iaddr_emb, delta_input])
+        input_cat = keras.layers.concatenate([cluster_emb, iaddr_emb,
+                                              delta_input], axis=2)
         lstm_bits = cluster_emb_len + iaddr_emb_len + n_delta_bits
-        lstm_in = keras.layers.Reshape((1, lstm_bits))(input_cat)
+        lstm_in = keras.layers.Reshape((unroll, lstm_bits))(input_cat)
 
-        lstm1 = keras.layers.LSTM(n_delta_bits, return_sequences=True)(lstm_in)
-        lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
-        sigmoid = keras.layers.Activation('sigmoid')(lstm2)
+        lstm1 = keras.layers.LSTM(32, input_shape=(unroll, lstm_bits),
+                                  return_sequences=True)(lstm_in)
+        ldrop = keras.layers.Dropout(0.2)(lstm1)
+        lstm2 = keras.layers.LSTM(32)(ldrop)
+        drop = keras.layers.Dropout(0.2)(lstm2)
+        fc = keras.layers.Dense(n_delta_bits)(drop)
+        sigmoid = keras.layers.Activation("sigmoid")(fc)
 
         model = keras.models.Model(inputs=[cluster_input, iaddr_input, delta_input], outputs=sigmoid)
         logger.info(model.summary())
-        model.compile(loss='binary_crossentropy', optimizer='adam',
+        model.compile(loss="categorical_crossentropy", optimizer="adam",
                       metrics=["accuracy"])
 
         models.append(model)

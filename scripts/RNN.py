@@ -59,13 +59,13 @@ def create_and_train(args):
         clus_in_data = in_data[cluster]
         clus_out_data = out_data[cluster]
 
-        times, features = clus_in_data.shape
+        times, unroll, features = clus_in_data.shape
         out_times, out_features = clus_out_data.shape
         assert(times == out_times)
 
-        clusters_stacked = clus_in_data[:, 0].reshape(times, 1)
-        iaddrs_stacked = clus_in_data[:, 1].reshape(times, 1)
-        deltas_stacked = clus_in_data[:, 2:].reshape(times, n_delta_bits)
+        clusters_stacked = clus_in_data[:, :, 0].reshape(times, unroll, 1)
+        iaddrs_stacked = clus_in_data[:, :, 1].reshape(times, unroll, 1)
+        deltas_stacked = clus_in_data[:, :, 2:].reshape(times, unroll, n_delta_bits)
 
         in_data_stacked[cluster] = [clusters_stacked, iaddrs_stacked,
                                     deltas_stacked]
