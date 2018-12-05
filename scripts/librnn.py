@@ -48,15 +48,17 @@ def parse_tests(test_df, cluster_df):
     outputs = {}
 
     for cluster, group in test_df.groupby("cluster"):
+        clusters = np.full((len(group), 1), cluster, dtype=np.uint8)
+        '''
         clusters_1h = np.zeros((len(group), n_cluster_bits), dtype=np.uint8)
         clusters_1h[:, cluster] = np.uint8(1)
+        '''
 
         # Convert uint64 instruction addresses to unpacked bits
-        '''
-        iaddrs= np.unpackbits(group["iaddr"].values.view(np.uint8),
-                              axis=1)
-        '''
         iaddrs = group["iaddr"].values
+        '''
+        iaddrs= np.unpackbits(group["iaddr"].values.view(np.uint8), axis=1)
+        '''
 
         delta_blocks = (group["delta"].values + np.int64(blocksize - 1)) // np.int64(blocksize)
 
@@ -64,7 +66,7 @@ def parse_tests(test_df, cluster_df):
         deltas_1h[np.arange(len(group)), delta_blocks + n_delta_bits // 2] = np.uint8(1)
 
         # Prefetch prediction is on the next delta so just shift the values by 1
-        inputs[cluster] = np.hstack((clusters_1h[:-1],
+        inputs[cluster] = np.hstack((clusters[:-1],
                                      iaddrs[:-1].reshape(-1, 1),
                                      deltas_1h[:-1]))
         outputs[cluster] = deltas_1h[1:]
@@ -74,32 +76,35 @@ def parse_tests(test_df, cluster_df):
 
     return (inputs, outputs)
 
-def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len):
+def create_network(n_clusters, cluster_emb_len, n_dct_iaddrs, iaddr_emb_len):
     logger = logging.getLogger()
 
     models = []
 
     for ci in range(n_clusters):
-        iaddr_input = keras.layers.Input(shape=(1,))
+        cluster_input = keras.layers.Input(shape=(1,))
+        cluster_emb = keras.layers.Embedding(n_clusters,
+                                             cluster_emb_len)(cluster_input)
+        cluster_emb = keras.layers.Reshape((cluster_emb_len,))(cluster_emb)
 
+        iaddr_input = keras.layers.Input(shape=(1,))
         iaddr_emb = keras.layers.Embedding(n_dct_iaddrs, iaddr_emb_len)(iaddr_input)
         iaddr_emb = keras.layers.Reshape((iaddr_emb_len,))(iaddr_emb)
 
         delta_input = keras.layers.Input(shape=(n_delta_bits,))
 
-        #input_cat = keras.layers.concatenate([iaddr_emb, delta_input])
+        input_cat = keras.layers.concatenate([cluster_emb, iaddr_emb, delta_input])
+        lstm_bits = cluster_emb_len + iaddr_emb_len + n_delta_bits
+        lstm_in = keras.layers.Reshape((1, lstm_bits))(input_cat)
 
-        #lstm_bits = iaddr_emb_len + n_delta_bits
-        input_cat = keras.layers.concatenate([iaddr_input, delta_input])
-        lstm_bits = 1 + n_delta_bits
-        lstm_in = keras.layers.Reshape((1,lstm_bits))(input_cat)
         lstm1 = keras.layers.LSTM(n_delta_bits, return_sequences=True)(lstm_in)
         lstm2 = keras.layers.LSTM(n_delta_bits)(lstm1)
         sigmoid = keras.layers.Activation('sigmoid')(lstm2)
 
-        model = keras.models.Model(inputs=[iaddr_input, delta_input], outputs=sigmoid)
+        model = keras.models.Model(inputs=[cluster_input, iaddr_input, delta_input], outputs=sigmoid)
         logger.info(model.summary())
-        model.compile(loss='binary_crossentropy', optimizer='adam')
+        model.compile(loss='binary_crossentropy', optimizer='adam',
+                      metrics=["accuracy"])
 
         models.append(model)
 
@@ -115,20 +120,17 @@ def create_network(n_clusters, n_dct_iaddrs, iaddr_emb_len):
 
     return models, weight_ties
 
-def fit_network(models, in_data, cluster_in_data, out_data, weight_ties):
-    return models
+def fit_network(models, in_data_stacked, out_data_stacked):
+    n_clusters = len(models)
 
-    '''
-    print(out_data.shape)
+    for cluster in range(n_clusters):
+        in_data = in_data_stacked[cluster]
+        out_data = out_data_stacked[cluster]
 
-    for i in range(cluster_in_data.shape[0]):
-        cluster = cluster_in_data[i]
-
-        input_data = [(in_data[0])[i,:].reshape(1,1), (in_data[1])[i,:].reshape(1,-1)]
-        models[cluster].fit(input_data, out_data[i,:].reshape(1,-1), epochs=5, verbose=1)
+        models[cluster].fit(in_data, out_data, epochs=5, validation_split=0.05,
+                            shuffle=True, verbose=1)
 
     return models
-    '''
 
 def predict(models, in_data, cluster_in_data):
     outputs = []
@@ -143,14 +145,12 @@ def predict(models, in_data, cluster_in_data):
 
     return np.array(outputs)
 
-def save_weights(models, weights_edirpath, weights_prefix="weights"):
+def save_weights(models, weights_dirpath, weights_prefix="weights"):
     logger = logging.getLogger()
-
-    weights_dirpath = os.path.expandvars(weights_edirpath)
 
     if not os.path.exists(weights_dirpath):
         os.makedirs(weights_dirpath)
-        logger.info("Created path to weights {}.".format(weights_edirpath))
+        logger.info("Created path to weights {}.".format(weights_dirpath))
 
     for i in range(len(models)):
         model = models[i]
@@ -161,43 +161,39 @@ def save_weights(models, weights_edirpath, weights_prefix="weights"):
         model.save_weights(weights_path)
         logging.info("\t> Successfully saved weights to {}".format(weights_path))
 
-def load_weights(models, num_clusters, weights_edirpath,
-                 weights_prefix="weights"):
-
+def load_weights(models, n_clusters, weights_dirpath, weights_prefix="weights"):
     logger = logging.getLogger()
 
-    weights_dirpath = os.path.expandvars(weights_edirpath)
-
-    for i in range(num_clusters):
+    for i in range(n_clusters):
         model = models[i]
         weight_fname = weights_prefix + '_' + str(i) + '.h5'
         weight_path = os.path.join(weights_dirpath, weight_fname)
 
-        model.load_weights(weight_fname)
+        model.load_weights(weight_path)
         logging.info("\t> Successfully loaded weights from " \
                      "{}".format(weight_path))
 
-def save_arch(models, arch_epath="model.json"):
+def save_arch(models, arch_path="model.json"):
     logger = logging.getLogger()
 
-    arch_path = os.path.expandvars(arch_epath)
-
-    logger.info("Saving model architecture to {}".format(arch_epath))
-    fout = open(arch_epath, "w")
+    logger.info("Saving model architecture to {}".format(arch_path))
+    fout = open(arch_path, "w")
     fout.write(models[0].to_json())
     fout.close()
     logging.info("\t> Successfully saved model architecture to " \
-                 "{}".format(arch_epath))
+                 "{}".format(arch_path))
 
-def load_arch(num_models, arch_epath="model.json"):
+def load_arch(num_models, arch_path="model.json"):
     logger = logging.getLogger()
 
-    arch_path = os.path.expandvars(arch_epath)
+    fin = open(arch_path, "r")
+    json = fin.read()
+    fin.close()
 
     models = []
     for i in range(num_models):
-        models.append(keras.models.model_from_json(arch_epath))
+        models.append(keras.models.model_from_json(json))
         logging.info("\t> Successfully loaded model architecture from" \
-                     "{}".format(arch_epath))
+                     "{}".format(arch_path))
 
     return models

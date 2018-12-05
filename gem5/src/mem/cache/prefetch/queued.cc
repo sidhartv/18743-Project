@@ -179,6 +179,14 @@ QueuedPrefetcher::regStats()
     pfSpanPage
         .name(name() + ".pfSpanPage")
         .desc("number of prefetches not generated due to page crossing");
+
+    pfSingle
+        .name(name() + ".pfSingle")
+        .desc("number of single line prefetch candidates identified");
+
+    pfMultiple
+        .name(name() + ".pfMultiple")
+        .desc("number of multi-line prefetch candidates identified");
 }
 
 PacketPtr

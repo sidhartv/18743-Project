@@ -44,27 +44,38 @@
 
 struct TaggedPrefetcherParams;
 
-class TaggedPrefetcher : public QueuedPrefetcher
-{
-  protected:
-      static const char modpath[];
-      static const char modname[];
-      static const char initfn_name[];
-      static const char testfn_name[];
-      static const char inferfn_name[];
+class TaggedPrefetcher : public QueuedPrefetcher {
+ protected:
+  static const char conda[];
+  static const char modpath[];
+  static const char modname[];
+  static const char testfn_name[];
+  static const char initfn_name[];
+  static const char inferfn_name[];
+  static const char inferchkfn_name[];
+  static const char cleanupfn_name[];
 
-  protected:
-      int degree;
-      PyObject *pModule;
-      PyObject *pFn_test, *pFn_init, *pFn_infer;
+  static const char rnn_archpath[];
+  static const char rnn_weightspath[];
+  static const char rnn_clusterpath[];
 
-  public:
-    TaggedPrefetcher(const TaggedPrefetcherParams *p);
+ protected:
+  int degree;
 
-    ~TaggedPrefetcher();
+  std::string pythonhome;
+  std::string programname;
 
-    void calculatePrefetch(const PacketPtr &pkt,
-                           std::vector<AddrPriority> &addresses);
+  PyObject *pModule;
+  PyObject *pFn_test, *pFn_init, *pFn_inferchk, *pFn_infer, *pFn_cleanup;
+  PyObject *pRNN_handle;
+
+ public:
+  TaggedPrefetcher(const TaggedPrefetcherParams *p);
+
+  ~TaggedPrefetcher();
+
+  void calculatePrefetch(const PacketPtr &pkt,
+                         std::vector<AddrPriority> &addresses);
 };
 
-#endif // __MEM_CACHE_PREFETCH_TAGGED_HH__
+#endif  // __MEM_CACHE_PREFETCH_TAGGED_HH__

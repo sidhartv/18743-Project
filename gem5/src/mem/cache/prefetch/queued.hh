@@ -110,6 +110,8 @@ class QueuedPrefetcher : public BasePrefetcher
     Stats::Scalar pfInCache;
     Stats::Scalar pfRemovedFull;
     Stats::Scalar pfSpanPage;
+    Stats::Scalar pfSingle;
+    Stats::Scalar pfMultiple;
 
   public:
     QueuedPrefetcher(const QueuedPrefetcherParams *p);
