@@ -20,7 +20,11 @@ max_cluster_width_bytes = max_cluster_width * blocksize
 # Maximum number of one-hot bits to encode deltas
 n_delta_bits = max_cluster_width + 1
 
-unroll = 2
+# Temporal unrolling
+unroll = 4
+
+# Maximum number of samples to train with
+max_samples = 10000
 
 def import_clusters(fname="cluster.out"):
     cluster_df = pd.read_csv(fname)
@@ -40,6 +44,14 @@ def encode_deltas(deltas):
     deltas_1h[np.arange(shape[0]), shifts] = np.uint8(1)
 
     return deltas_1h
+
+def decode_deltas(deltas_1h):
+    shape = deltas_1h.shape
+
+    delta_blocks = np.argmax(deltas_1h, axis=1) - (n_delta_bits // 2)
+    deltas = delta_blocks.reshape(shape[0]).astype(np.int64) * blocksize
+
+    return deltas
 
 def parse_tests(test_df, cluster_df):
     logger = logging.getLogger()
@@ -136,6 +148,7 @@ def create_network(n_clusters, cluster_emb_len, n_dct_iaddrs, iaddr_emb_len):
         models.append(model)
 
     weight_ties = dict()
+    '''
     for ci in range(n_clusters):
         weight_ties[ci] = []
         for cj in range(n_clusters):
@@ -143,34 +156,59 @@ def create_network(n_clusters, cluster_emb_len, n_dct_iaddrs, iaddr_emb_len):
                 continue
             for Wi,Wj in zip(models[ci].trainable_weights, models[cj].trainable_weights):
                 weight_ties[ci].append(tf.assign(Wj, Wi))
+    '''
 
 
     return models, weight_ties
 
+def get_samples(cluster_data, iaddr_data, delta_data, out_data, new_n_samples=1):
+    n_samples = cluster_data.shape[0]
+    mask = np.random.choice(np.arange(n_samples), new_n_samples, replace=False)
+
+    sampled_data = [cluster_data[mask],
+                    iaddr_data[mask],
+                    delta_data[mask],
+                    out_data[mask]]
+
+    return sampled_data
+
 def fit_network(models, in_data_stacked, out_data_stacked):
     n_clusters = len(models)
 
+    histories = []
     for cluster in range(n_clusters):
-        in_data = in_data_stacked[cluster]
+        cluster_data, iaddr_data, delta_data = in_data_stacked[cluster]
         out_data = out_data_stacked[cluster]
 
-        models[cluster].fit(in_data, out_data, epochs=5, validation_split=0.05,
-                            shuffle=True, verbose=1)
+        new_n_samples = min(cluster_data.shape[0], max_samples)
+        sampled = get_samples(cluster_data, iaddr_data, delta_data, out_data,
+                              new_n_samples=new_n_samples)
+        cluster_data, iaddr_data, delta_data, out_data = sampled
+        in_data = [cluster_data, iaddr_data, delta_data]
 
-    return models
+        history = models[cluster].fit(in_data, out_data, epochs=20,
+                                      validation_split=0.2, verbose=1)
 
-def predict(models, in_data, cluster_in_data):
-    outputs = []
+        histories.append(history)
 
-    '''
-    for i in range(cluster_in_data.shape[0]):
-        cluster = cluster_in_data[i]
-        input_data = [(in_data[0])[i,:].reshape(1,1), (in_data[1])[i,:].reshape(1,-1)]
-        output = models[cluster].predict(input_data)
-        outputs.append(output)
-    '''
+    return (models, histories)
 
-    return np.array(outputs)
+def predict(models, cluster_df, cluster, pred_data):
+    targets = models[cluster].predict(pred_data)
+    targets = targets.reshape(n_delta_bits)
+
+    predictions = []
+    for c, t in enumerate(targets):
+        if t > thresh:
+            infer_delta_blocks = c - (n_delta_bits // 2)
+            infer_delta = np.int64(infer_delta_blocks * blocksize)
+            infer_daddr = (np.int64(cluster_df["centroid"][cluster]) +
+                            infer_delta)
+
+            infer_daddr = np.uint64(infer_daddr)
+            predictions.append(long(infer_daddr))
+
+    return predictions
 
 def save_weights(models, weights_dirpath, weights_prefix="weights"):
     logger = logging.getLogger()

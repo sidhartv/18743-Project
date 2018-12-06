@@ -9,10 +9,10 @@ import re
 import sys
 import tarfile
 
-#  import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-#  import seaborn as sns
+import seaborn as sns
 from sklearn import metrics
 from sklearn.cluster import DBSCAN
 
