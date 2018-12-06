@@ -144,11 +144,9 @@ def main():
 
         cluster_df.to_csv(args.outfile)
 
-    '''
     if args.violin_outfile:
         fig = violin_misses(access_df)
         fig.savefig(args.violin_outfile)
-    '''
 
     if args.test_outfile:
         access_df.to_csv(args.test_outfile)
